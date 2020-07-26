@@ -5,12 +5,7 @@ Created on 25/07/2020 下午4:15
 @Author: xinzhi yao
 """
 
-"""
-Ontology 文件处理
-1. tsv/csv 文件同 obo格式转换。
-2. obo 文件转换为 basic格式。
-3. 本体整合 增加/删除父节点，增加/删除子节点，更改父节点，合并节点
-"""
+
 
 import os
 import re
@@ -34,6 +29,7 @@ class node():
         self.synonym = syno_set
         self.parents = parents
 
+    # todo: add warning of empty parents/childs.
     def add_parent(self, term):
         if term in self.parents:
             print('{0} is already in the parent node of {1}.'.format(term, self._id))
@@ -46,6 +42,8 @@ class node():
             print('{0} is not in the parent node of {1}.'.format(term, self._id))
         else:
             self.parents.remove(term)
+            if not self.parents:
+                print('Warning: Parent of {0} is empty.'.format(self._id))
             print('Successfully deleted {0} from the parent node of {1}.'.format(term, self._id))
 
     def add_child(self, term):
@@ -68,6 +66,12 @@ class ontology_edit():
         self.obo_file = obo_file
 
         self.head_block = ''
+
+        self.format_version = ''
+        self.date = ''
+        self.saved_by = ''
+        self.default_namespace = ''
+
         self.nodes = {}
         self.node_set = set()
         self.term2id = {}
@@ -82,19 +86,19 @@ class ontology_edit():
         _id = name = definition = ''
         syno_set = parent_set = set()
 
-        head_flag = True
         with open(self.obo_file) as f:
             for line in f:
 
                 l = line.strip()
-                if l == '[Term]':
-                    head_flag = False
-                if head_flag:
-                    self.head_block += '\n'
-                    self.head_block += l
-                    continue
+                if l.startswith('format-version:'):
+                    self.format_version = ' '.join(l.split()[1:])
+                if l.startswith('date:'):
+                    self.date = ' '.join(l.split()[1:])
+                if l.startswith('saved-by:'):
+                    self.saved_by = ' '.join(l.split()[1:])
+                if l.startswith('default-namespace:'):
+                    self.default_namespace = ' '.join(l.split()[1:])
                 if l == '':
-                    head_flag = False
                     if _id:
                         self.term2id[name] = _id
                         # update node information.
@@ -132,6 +136,15 @@ class ontology_edit():
             self.graph.add_node(_id, name=term)
         self.graph.add_edges_from(self.isa_set)
 
+    def change_head(self, format_version=None, date=None, saved_by=None, namespace=None):
+        if format_version:
+            self.format_version = format_version
+        if date:
+            self.date = date
+        if saved_by:
+            self.saved_by = saved_by
+        if names:
+            self.default_namespace = namespace
 
     @staticmethod
     def tsv_to_obo(tsv_file: str, obo_file: str, prefix: None):
@@ -248,13 +261,26 @@ class ontology_edit():
             self.nodes[parent_node].del_child(child_node)
             self.nodes[child_node].del_parent(parent_node)
 
+    def del_node(self, node_id: str):
+        for parent_node in self.nodes[node_id].parents:
+            self.nodes[parent_node].del_child(node_id)
+        for child_node in self.nodes[node_id].childs:
+            self.nodes[child_node].del_parent(node_id)
+        del self.nodes[node_id]
+
+
     def change_relation(self, old_parent_node: str, new_parent_node: str, child_node: str, use_id=False):
         self.del_relation(old_parent_node, child_node, use_id)
         self.add_relation(new_parent_node, child_node, use_id)
 
-    # todo
-    def merge_node(self):
-        pass
+    def merge_node(self, old_node: str, new_node: str):
+        for parent_node in self.nodes[old_node].parents:
+            self.nodes[parent_node].del_child(old_node)
+            self.nodes[parent_node].add_child(new_node)
+        for child_node in self.nodes[old_node].childs:
+            self.nodes[child_node].del_parent(child_node)
+            self.nodes[child_node].add_child(child_node)
+        del self.nodes[old_node]
 
     def get_child(self, root_node: str, use_id=True):
 
@@ -305,8 +331,24 @@ class ontology_edit():
                         term_block = [ ]
         wf.close()
 
-
-
+    def export_obo(self, out: str):
+        sorted_id = sorted(self.node_set)
+        with open(out) as wf:
+            wf.write('{0}\n'.format(self.format_version))
+            wf.write('{0}\n'.format(self.date))
+            wf.write('{0}\n'.format(self.saved_by))
+            wf.write('{0}\n'.format(self.default_namespace))
+            wf.write('\n')
+            for _id in sorted_id:
+                wf.write('[Term]\n')
+                wf.write('id:\t{0}\n'.format(_id))
+                wf.write('name:\t{0}\n'.format(self.nodes[_id].name))
+                wf.write('def:\t{0}\n'.format(self.nodes[_id].definition))
+                for syno in self.nodes[_id].synonym:
+                    wf.write('synonym:\t{0}\n'.format(syno))
+                for parent_node in self.nodes[_id].parents:
+                    wf.write('is_a:{0} ! {1}\n'.format(parent_node, self.nodes[parent_node].name))
+                wf.write('\n')
 
 if __name__ == '__main__':
     obo_file = '../PTO/data/Ontology_db/wto-basic.obo'
