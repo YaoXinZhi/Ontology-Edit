@@ -1,2 +1,2 @@
 # Ontology-Edit  
-An Ontology-Edit (work in progress)
+A series of scripts for obo format ontology revisions, written by myself.
